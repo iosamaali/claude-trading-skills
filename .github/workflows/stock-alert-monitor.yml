@@ -1,0 +1,53 @@
+name: Stock Alert Monitor
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'   # every 10 minutes
+  workflow_dispatch:           # allow manual trigger from Actions tab
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Restore the seen-state from the most recent previous run so we never
+      # re-alert on a headline we already matched.
+      - name: Restore seen-state cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/stock-alert-monitor
+          key: stock-monitor-seen-${{ github.run_id }}
+          restore-keys: |
+            stock-monitor-seen-
+
+      # Run one pass of the catalyst monitor.
+      # ALERT_WEBHOOK is read automatically from the env by monitor.py
+      # (it falls back to os.environ.get("ALERT_WEBHOOK")).
+      # --no-strict: allow candidates through when quote API is partially blocked.
+      # --any-exchange: cover NYSE + NASDAQ, not NASDAQ-only.
+      # --max-price 20: user target is stocks under $20.
+      - name: Run catalyst monitor (single pass)
+        env:
+          ALERT_WEBHOOK: ${{ secrets.ALERT_WEBHOOK }}
+        run: |
+          python3 skills/stock-alert-monitor/monitor.py \
+            --once \
+            --no-strict \
+            --any-exchange \
+            --max-price 20 \
+            --min-price 0.10 \
+            --min-change-pct 0 \
+            --min-avg-vol 0 \
+            --min-rel-vol 0
+
+      # Always save the updated seen-state so the next run doesn't re-fire
+      # on headlines already processed.
+      - name: Save seen-state cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/stock-alert-monitor
+          key: stock-monitor-seen-${{ github.run_id }}
