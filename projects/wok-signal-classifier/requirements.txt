@@ -1,0 +1,9 @@
+# Core (required)
+pandas
+numpy
+scikit-learn
+xgboost
+
+# Optional (recommended)
+shap        # SHAP feature importance
+httpx       # live data fetch (--live)

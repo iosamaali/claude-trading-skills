@@ -1,0 +1,86 @@
+[1/4] No --csv/--live — generating 120d synthetic WOK data.
+      (Set BIRDEYE_API_KEY + WOK_MINT and use --live for real data.)
+      Source: SYNTHETIC (120d, seed=42)
+      Bars: 2880  (2025-01-01 → 2025-04-30)
+[2/4] Engineering features (RSI, MACD, BB width, volume ratio, holder momentum) ...
+      Usable rows: 2852  (>2% moves: 992  |  others: 1860  |  base rate: 34.8%)
+[3/4] Running walk-forward validation (30d train / 7d test) ...
+      83 folds, 13944 out-of-sample predictions.
+[4/4] Computing SHAP feature importance ...
+      done.
+
+========================================================================
+WOK SIGNAL CLASSIFIER — WALK-FORWARD RESULTS
+Target: close[t+4h] / close[t] - 1 > 2%   (1h bars)
+Windows: train=720b/30d  test=168b/7d  step=24b/1d  gap=4b
+========================================================================
+
+Fold  Train  Test   Pos%    Acc   Prec    Rec     F1    AUC
+------------------------------------------------------------
+   1    696   168  26.2%  0.595  0.367  0.750  0.493  0.774
+   2    720   168  28.6%  0.571  0.367  0.688  0.478  0.734
+   3    720   168  26.2%  0.577  0.329  0.591  0.423  0.664
+   4    720   168  21.4%  0.530  0.235  0.528  0.325  0.608
+   5    720   168  21.4%  0.595  0.289  0.611  0.393  0.620
+   6    720   168  32.1%  0.548  0.372  0.593  0.457  0.602
+   7    720   168  38.1%  0.577  0.443  0.422  0.432  0.562
+   8    720   168  43.5%  0.607  0.557  0.466  0.507  0.595
+ ...
+  76    720   168  54.8%  0.583  0.631  0.576  0.602  0.627
+  77    720   168  48.8%  0.619  0.632  0.524  0.573  0.665
+  78    720   168  42.3%  0.601  0.533  0.451  0.489  0.615
+  79    720   168  38.1%  0.607  0.483  0.453  0.468  0.615
+  80    720   168  41.1%  0.679  0.642  0.493  0.557  0.696
+  81    720   168  46.4%  0.702  0.719  0.590  0.648  0.735
+  82    720   168  42.3%  0.661  0.652  0.423  0.513  0.717
+  83    720   168  44.6%  0.667  0.642  0.573  0.606  0.728
+------------------------------------------------------------
+
+AGGREGATE OUT-OF-SAMPLE  (13944 predictions, 83 folds)
+------------------------------------------------------------
+  Positive rate (actual >2% moves):  33.9%
+  Accuracy : 0.627
+  Precision: 0.455  (of predicted pumps, how many were real)
+  Recall   : 0.505  (of real pumps, how many we caught)
+  F1       : 0.478
+  ROC-AUC  : 0.645
+  PR-AUC   : 0.471  (baseline = 0.339)
+
+  Confusion matrix @0.5      pred:0   pred:1
+             actual 0       6348     2863
+             actual 1       2345     2388
+
+  Per-fold AUC: 0.636 ± 0.087 (stability across 83 folds)
+
+FEATURE IMPORTANCE — XGBoost gain (mean across folds)
+------------------------------------------------------------
+   1. holder_mom_4     0.1750  ########################
+   2. holder_mom_12    0.1231  #################
+   3. holder_mom_24    0.1120  ###############
+   4. macd_line        0.1074  ###############
+   5. macd_signal      0.1039  ##############
+   6. bb_width         0.1031  ##############
+   7. macd_hist        0.0995  ##############
+   8. rsi_14           0.0975  #############
+   9. volume_ratio     0.0787  ###########
+
+FEATURE IMPORTANCE — mean |SHAP| (full-history model)
+------------------------------------------------------------
+   1. holder_mom_4     0.6931  ########################
+   2. holder_mom_12    0.2474  #########
+   3. holder_mom_24    0.2271  ########
+   4. bb_width         0.1322  #####
+   5. rsi_14           0.1261  ####
+   6. macd_signal      0.1200  ####
+   7. macd_line        0.0976  ###
+   8. volume_ratio     0.0917  ###
+   9. macd_hist        0.0897  ###
+
+ASSESSMENT
+------------------------------------------------------------
+  ROC-AUC 0.645 > 0.55 — model shows predictive edge.
+  Note: '>2% in 4h' is rare and imbalanced — judge by PR-AUC and
+  precision, not raw accuracy, and always net trading costs.
+
+  Research/educational use only. Not investment advice.
+========================================================================
