@@ -13,9 +13,12 @@ name: stock-alert-monitor
 
 on:
   schedule:
-    # every 15 min during US market hours (13:00-20:00 UTC ~= 9a-4p ET), Mon-Fri.
-    # NOTE: GitHub may delay scheduled runs under load; cron is UTC.
-    - cron: "*/15 13-20 * * 1-5"
+    # weekdays: every 15 min, all hours — covers pre-market, regular session,
+    # and after-hours (catalysts frequently drop pre-open and after the close).
+    - cron: "*/15 * * * 1-5"
+    # weekends: hourly — catch weekend M&A / deal announcements.
+    - cron: "0 * * * 0,6"
+    # NOTE: GitHub runs schedules in UTC and may delay them under load.
   workflow_dispatch:
     inputs:
       strict:
