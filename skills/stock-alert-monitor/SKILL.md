@@ -77,8 +77,11 @@ Key flags (screen flags are in the table above):
 | `--stop-pct P` | `8` | Fallback hard-stop % below entry when no session low |
 | `--pullback-pct P` | `10` | "Wait for pullback" entry level, % below current |
 | `--watch-pct P` | `25` | "Just watch" level, % below current |
-| `--target-r R` | `2.0` | First target (sell 50%) as an R multiple of risk |
-| `--extended-pct P` | `20` | If daily %change exceeds this, recommend waiting (don't chase) |
+| `--target-r R` | `3.0` | First target (sell 50%) as an R multiple of risk (1:3) |
+| `--extended-pct P` | `20` | If %change exceeds this, recommend waiting (don't chase) |
+| `--hot-float N` | `10M` | 🔥 3x-runner tag: max float |
+| `--hot-rvol R` | `5` | 🔥 3x-runner tag: min relative volume |
+| `--hot-gap P` | `20` | 🔥 3x-runner tag: min %change (pre/post/regular) |
 
 ## Running It Persistently
 
@@ -127,7 +130,8 @@ Target (Sell 50%): $2.82  (2R)
 https://…
 ```
 
-- **Header emoji**: 🟢 actionable now · 🟡 extended (`change_pct ≥ --extended-pct`) → recommends waiting for a pullback instead of chasing.
+- **Extended hours**: the quote is **session-aware** — in pre/after-hours it screens and shows the **pre/post-market** price + %change (tagged ` pre`/` post`), so gappers register before the open and after the close.
+- **Header emoji**: 🟢 actionable now · 🟡 extended (`change_pct ≥ --extended-pct`) → recommends waiting for a pullback instead of chasing. A **🔥** prefix flags a potential **3x runner** (float ≤ `--hot-float`, RVOL ≥ `--hot-rvol`, gap ≥ `--hot-gap`).
 - **Entry** = current ask; **pullback**/**watch** levels are `--pullback-pct` / `--watch-pct` below it.
 - **Stop (Hard)** = session low when it sits below entry, else a `--stop-pct` stop. *A true 15-minute-low stop needs intraday bars — that lives in `momentum_lifecycle.py`; the scanner uses the session low as the closest quote-level proxy.*
 - **Target (Sell 50%)** = entry + `--target-r` × (entry − stop).
