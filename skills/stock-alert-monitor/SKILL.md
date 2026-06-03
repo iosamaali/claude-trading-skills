@@ -49,7 +49,11 @@ file, and emits **one staged TRADE SIGNAL per new match** on stdout.
 
 A headline must resolve to a **ticker with a confirmed quote** to alert — tickerless
 press releases (which can't be screened or sized) are dropped. This is the precision
-guard that keeps the feed actionable.
+guard that keeps the feed actionable. When a headline doesn't embed `(Nasdaq: XYZ)`,
+the ticker is resolved from the **issuer name** via SEC's official
+`company_tickers.json` (cached, refreshed daily) using a conservative exact
+normalized-name match — so the existing feeds stay useful without mis-resolving a
+multi-word issuer down to a common single word. Disable with `--no-resolve-names`.
 
 ```
 python skills/stock-alert-monitor/monitor.py --interval 120      # full default screen
@@ -64,6 +68,7 @@ Key flags (screen flags are in the table above):
 | `--interval N` | `300` | Seconds between polls |
 | `--strict/--no-strict` | strict | Drop (or allow) candidates whose screen metrics can't be confirmed |
 | `--quotes/--no-quotes` | on | Fetch live price/volume/float per ticker |
+| `--resolve-names/--no-resolve-names` | on | Resolve ticker from issuer name via SEC `company_tickers.json` |
 | `--webhook URL` | `$ALERT_WEBHOOK` | POST each match to Slack/Discord-style webhook |
 | `--once` | off | Single pass then exit (for cron or `/loop`) |
 | `--state PATH` | `~/.cache/stock-alert-monitor/seen.txt` | De-dup memory |
