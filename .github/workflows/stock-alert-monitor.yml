@@ -13,9 +13,12 @@ name: stock-alert-monitor
 
 on:
   schedule:
-    # every 15 min during US market hours (13:00-20:00 UTC ~= 9a-4p ET), Mon-Fri.
-    # NOTE: GitHub may delay scheduled runs under load; cron is UTC.
-    - cron: "*/15 13-20 * * 1-5"
+    # weekdays: every 15 min, all hours — covers pre-market, regular session,
+    # and after-hours (catalysts frequently drop pre-open and after the close).
+    - cron: "*/15 * * * 1-5"
+    # weekends: hourly — catch weekend M&A / deal announcements.
+    - cron: "0 * * * 0,6"
+    # NOTE: GitHub runs schedules in UTC and may delay them under load.
   workflow_dispatch:
     inputs:
       strict:
@@ -29,6 +32,10 @@ on:
 
 permissions:
   contents: read
+
+# run the JS actions on Node 24 (Node 20 is deprecated on the runners)
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 concurrency:
   group: stock-alert-monitor
@@ -53,6 +60,15 @@ jobs:
           restore-keys: |
             stock-alert-seen-
 
+      # cache the SEC issuer map so it isn't re-fetched every run (TTL handled in-script)
+      - name: Restore SEC issuer map
+        uses: actions/cache@v4
+        with:
+          path: .cache/company_tickers.json
+          key: sec-issuers-${{ github.run_id }}
+          restore-keys: |
+            sec-issuers-
+
       - name: Scan + alert
         env:
           ALERT_WEBHOOK: ${{ secrets.ALERT_WEBHOOK }}
@@ -70,4 +86,5 @@ jobs:
             --once $STRICT_FLAG \
             --equity "$EQUITY" \
             --state .cache/seen.txt \
+            --issuer-cache .cache/company_tickers.json \
             --webhook "$ALERT_WEBHOOK"

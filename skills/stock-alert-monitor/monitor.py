@@ -146,6 +146,76 @@ def extract_exchange(text: str) -> str | None:
     return m.group(1).upper() if m else None
 
 
+# --- issuer name -> ticker resolution via SEC's official mapping ---------------
+# Many press-release feeds don't embed "(Nasdaq: XYZ)" in the headline. The SEC's
+# company_tickers.json maps every US filer's name to its ticker, letting us resolve
+# a ticker from the issuer name that leads most releases. The quote fetch then
+# still confirms exchange/price, so a mis-resolved name can't pass the screen blind.
+SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
+_NAME_SUFFIXES = {
+    "inc", "incorporated", "corp", "corporation", "co", "company", "ltd",
+    "limited", "plc", "sa", "ag", "nv", "llc", "lp", "holdings", "holding",
+    "group", "the", "se", "ab", "as",
+}
+# split a headline at the first "<Company> <verb>/<punct> ..." boundary
+_TITLE_SPLIT = re.compile(
+    r"\s+(?:announces?|reports?|provides?|completes?|closes?|receives?|appoints?|"
+    r"enters?|signs?|acquires?|launches?|unveils?|to\s|:|–|—|-)\s?",
+    re.IGNORECASE,
+)
+
+
+def _norm_name(s: str) -> str:
+    s = unescape(s or "").lower()
+    s = re.sub(r"[^a-z0-9 ]", " ", s)
+    toks = [t for t in s.split() if t and t not in _NAME_SUFFIXES]
+    return " ".join(toks)
+
+
+def load_issuer_map(cache_path: str, ttl: int = 86400, timeout: int = 20) -> dict:
+    """Return {normalized issuer name: TICKER} from SEC, cached locally with a TTL."""
+    raw = None
+    try:
+        p = Path(cache_path)
+        if p.exists() and (time.time() - p.stat().st_mtime) < ttl:
+            raw = p.read_text()
+        else:
+            raw = _http_get(SEC_TICKERS_URL, timeout)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(raw)
+    except Exception as e:
+        print(f"# issuer map fetch error: {e}", file=sys.stderr, flush=True)
+        return {}
+    out: dict[str, str] = {}
+    try:
+        for row in json.loads(raw).values():
+            nm = _norm_name(row.get("title", ""))
+            tk = (row.get("ticker") or "").upper()
+            if nm and tk and nm not in out:  # first (lowest CIK) wins
+                out[nm] = tk
+    except Exception as e:
+        print(f"# issuer map parse error: {e}", file=sys.stderr, flush=True)
+    return out
+
+
+def resolve_ticker_from_name(title: str, issuer_map: dict) -> str | None:
+    if not issuer_map or not title:
+        return None
+    head = _TITLE_SPLIT.split(title, 1)[0]
+    toks = _norm_name(head).split()
+    if not toks:
+        return None
+    # longest normalized prefix matching a known issuer wins. Never collapse a
+    # multi-word head down to a single common token (e.g. "Apple Hospitality" must
+    # not resolve to "apple"/AAPL) — that would be a dangerous mis-resolution.
+    min_n = 1 if len(toks) == 1 else 2
+    for n in range(len(toks), min_n - 1, -1):
+        cand = " ".join(toks[:n])
+        if len(cand) >= 4 and cand in issuer_map:
+            return issuer_map[cand]
+    return None
+
+
 def fetch_quote(ticker: str, timeout: int = 12) -> dict | None:
     """Live quote backing the screen: price, volume, 30d-avg vol, relative
     volume, daily % change, float. Tries Yahoo v7 (rich fundamentals) then
@@ -326,7 +396,7 @@ def notify_webhook(url: str, payload: dict) -> None:
         print(f"# webhook error: {e}", file=sys.stderr, flush=True)
 
 
-def run_pass(args, seen: set, webhook: str | None) -> int:
+def run_pass(args, seen: set, webhook: str | None, issuer_map: dict | None = None) -> int:
     new_count = 0
     for feed in args.feeds:
         try:
@@ -344,6 +414,8 @@ def run_pass(args, seen: set, webhook: str | None) -> int:
                 seen.add(key)
                 continue
             ticker = extract_ticker(text)
+            if not ticker and args.resolve_names:
+                ticker = resolve_ticker_from_name(item["title"], issuer_map or {})
             # require a resolved ticker — a headline with no ticker can't be quoted,
             # screened, or sized, so it isn't an actionable trade signal.
             if not ticker:
@@ -438,6 +510,13 @@ def main() -> int:
     p.add_argument("--quotes", action="store_true", default=True,
                    help="fetch price/volume/float (needs quote API egress)")
     p.add_argument("--no-quotes", dest="quotes", action="store_false")
+    p.add_argument("--resolve-names", action="store_true", default=True,
+                   help="resolve tickers from issuer names via SEC company_tickers.json")
+    p.add_argument("--no-resolve-names", dest="resolve_names", action="store_false")
+    p.add_argument("--issuer-cache", default=os.path.expanduser(
+        "~/.cache/stock-alert-monitor/company_tickers.json"))
+    p.add_argument("--issuer-ttl", type=int, default=86400,
+                   help="seconds before refreshing the SEC issuer map")
     p.add_argument("--timeout", type=int, default=20)
     p.add_argument("--webhook", default=os.environ.get("ALERT_WEBHOOK"))
     p.add_argument("--state", default=os.path.expanduser(
@@ -456,9 +535,14 @@ def main() -> int:
         file=sys.stderr, flush=True,
     )
 
+    issuer_map = (load_issuer_map(args.issuer_cache, args.issuer_ttl)
+                  if (args.resolve_names and args.quotes) else {})
+    if args.resolve_names:
+        print(f"# issuer map: {len(issuer_map)} names", file=sys.stderr, flush=True)
+
     try:
         while True:
-            n = run_pass(args, seen, args.webhook)
+            n = run_pass(args, seen, args.webhook, issuer_map)
             save_seen(state, seen)
             if args.once:
                 print(f"# pass complete, {n} new match(es)", file=sys.stderr, flush=True)
