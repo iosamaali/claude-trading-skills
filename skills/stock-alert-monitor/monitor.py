@@ -99,6 +99,8 @@ TAG_RE = re.compile(r"<[^>]+>")
 QUOTE_FIELDS = (
     "regularMarketPrice,regularMarketVolume,regularMarketChangePercent,"
     "regularMarketDayHigh,regularMarketDayLow,regularMarketPreviousClose,bid,ask,"
+    "marketState,preMarketPrice,preMarketChangePercent,"
+    "postMarketPrice,postMarketChangePercent,"
     "averageDailyVolume3Month,averageDailyVolume10Day,floatShares,"
     "sharesOutstanding,fullExchangeName,currency"
 )
@@ -233,12 +235,24 @@ def fetch_quote(ticker: str, timeout: int = 12) -> dict | None:
         vol = q.get("regularMarketVolume")
         avg = q.get("averageDailyVolume3Month") or q.get("averageDailyVolume10Day")
         flt = q.get("floatShares") or q.get("sharesOutstanding")
+        reg_p = q.get("regularMarketPrice")
+        reg_c = q.get("regularMarketChangePercent")
+        # pick the session-relevant price/change so a pre/after-hours gap registers
+        state = (q.get("marketState") or "").upper()
+        if state in ("PRE", "PREPRE") and q.get("preMarketPrice"):
+            session, s_price, s_chg = "pre", q.get("preMarketPrice"), q.get("preMarketChangePercent")
+        elif state in ("POST", "POSTPOST", "CLOSED") and q.get("postMarketPrice"):
+            session, s_price, s_chg = "post", q.get("postMarketPrice"), q.get("postMarketChangePercent")
+        else:
+            session, s_price, s_chg = "regular", reg_p, reg_c
         return {
-            "price": q.get("regularMarketPrice"),
+            "price": s_price or reg_p,
             "volume": vol,
             "avg_vol_30d": avg,
             "rel_vol": (vol / avg) if (vol and avg) else None,
-            "change_pct": q.get("regularMarketChangePercent"),
+            "change_pct": s_chg if s_chg is not None else reg_c,
+            "session": session,
+            "regular_price": reg_p,
             "float": flt,
             "ask": q.get("ask"),
             "bid": q.get("bid"),
@@ -263,6 +277,8 @@ def fetch_quote(ticker: str, timeout: int = 12) -> dict | None:
             "avg_vol_30d": None,
             "rel_vol": None,
             "change_pct": ((price - prev) / prev * 100) if (price and prev) else None,
+            "session": "regular",
+            "regular_price": price,
             "float": None,
             "ask": None,
             "bid": None,
@@ -347,10 +363,16 @@ def trade_levels(q: dict, args) -> dict:
     pullback = round(entry * (1 - args.pullback_pct / 100), 2) if entry else None
     watch = round(entry * (1 - args.watch_pct / 100), 2) if entry else None
     size = int(args.equity * args.alloc_pct / 100 / entry) if (args.equity and entry) else None
+    hot = bool(
+        q.get("float") and q["float"] <= args.hot_float
+        and q.get("rel_vol") and q["rel_vol"] >= args.hot_rvol
+        and chg is not None and chg >= args.hot_gap
+    )
     return {
         "entry": entry, "ask": ask, "stop": stop, "stop_label": stop_label,
         "risk": risk, "target": target, "pullback": pullback, "watch": watch,
-        "size": size, "extended": (chg is not None and chg >= args.extended_pct),
+        "size": size, "hot": hot,
+        "extended": (chg is not None and chg >= args.extended_pct),
     }
 
 
@@ -358,12 +380,15 @@ def format_trade_signal(ticker: str, q: dict, args, title: str = "", link: str =
     """Render a quote into the staged TRADE SIGNAL message + structured levels."""
     L = trade_levels(q, args)
     chg = q.get("change_pct")
-    chg_s = f"{chg:+.1f}%" if chg is not None else "?"
+    session = q.get("session") or "regular"
+    sess_tag = "" if session == "regular" else f" {session}"
+    chg_s = f"{chg:+.1f}%{sess_tag}" if chg is not None else "?"
     float_s = f"{q['float'] / 1e6:.1f}M" if q.get("float") else "?"
     rvol_s = f"{q['rel_vol']:.1f}x" if q.get("rel_vol") else "?"
     emoji = "🟡" if L["extended"] else "🟢"
+    prefix = "🔥 " if L["hot"] else ""
 
-    lines = [f"{emoji} TRADE SIGNAL: ${ticker}  ({chg_s})", ""]
+    lines = [f"{prefix}{emoji} TRADE SIGNAL: ${ticker}  ({chg_s})", ""]
     if L["extended"]:
         lines.append(f"Action: WAIT — extended {chg_s}; take position on pullback to ${_p(L['pullback'])}")
         lines.append(f"  • Chase entry (higher risk) at ask ${_p(L['ask'])}")
@@ -372,6 +397,8 @@ def format_trade_signal(ticker: str, q: dict, args, title: str = "", link: str =
         lines.append(f"Action: BUY Limit at ${_p(L['entry'])} (Current Ask: ${_p(L['ask'])})")
         lines.append(f"  • Or wait for pullback — take position at ${_p(L['pullback'])}")
         lines.append(f"  • Or don't buy, just watch at ${_p(L['watch'])}")
+    if L["hot"]:
+        lines.append("🔥 Potential 3x runner — ultra-low float + high RVOL + big gap. Extreme risk; size small.")
     lines += ["", f"Float: {float_s} | RVOL: {rvol_s}", f"Volume: {_human(q.get('volume'))}"]
     if L["size"]:
         lines.append(f"Calculated Size: {L['size']:,} shares ({args.alloc_pct:g}% of ${args.equity:,.0f} equity)")
@@ -502,10 +529,17 @@ def main() -> int:
                    help="'wait for pullback' entry level, %% below current")
     p.add_argument("--watch-pct", type=float, default=25,
                    help="'just watch' level, %% below current")
-    p.add_argument("--target-r", type=float, default=2.0,
-                   help="first target (sell 50%%) as an R multiple of entry-to-stop risk")
+    p.add_argument("--target-r", type=float, default=3.0,
+                   help="first target (sell 50%%) as an R multiple of risk (1:3 by default)")
     p.add_argument("--extended-pct", type=float, default=20,
                    help="if daily %% change exceeds this, recommend waiting not chasing")
+    # --- 🔥 3x-runner tag (ultra-low float + high RVOL + big gap) ---
+    p.add_argument("--hot-float", type=float, default=10_000_000,
+                   help="3x-runner tag: max float in shares")
+    p.add_argument("--hot-rvol", type=float, default=5.0,
+                   help="3x-runner tag: min relative volume")
+    p.add_argument("--hot-gap", type=float, default=20.0,
+                   help="3x-runner tag: min %% change (pre/post/regular)")
     # --- plumbing ---
     p.add_argument("--quotes", action="store_true", default=True,
                    help="fetch price/volume/float (needs quote API egress)")
