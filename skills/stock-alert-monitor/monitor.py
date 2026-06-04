@@ -484,6 +484,8 @@ def run_pass(args, seen: set, webhook: str | None, issuer_map: dict | None = Non
             print(json.dumps(match), flush=True)
             if webhook:
                 notify_webhook(webhook, match)
+            if args.max_alerts and new_count >= args.max_alerts:
+                return new_count  # cap reached; remaining items stay unseen for next pass
     return new_count
 
 
@@ -562,6 +564,8 @@ def main() -> int:
     p.add_argument("--state", default=os.path.expanduser(
         "~/.cache/stock-alert-monitor/seen.txt"))
     p.add_argument("--once", action="store_true", help="single pass then exit")
+    p.add_argument("--max-alerts", type=int, default=0,
+                   help="cap alerts emitted per pass (0 = unlimited)")
     args = p.parse_args()
 
     state = Path(args.state)
