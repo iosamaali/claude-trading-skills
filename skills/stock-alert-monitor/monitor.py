@@ -106,8 +106,8 @@ QUOTE_FIELDS = (
 )
 
 
-def _http_get(url: str, timeout: int = 20) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
+def _http_get(url: str, timeout: int = 20, ua: str = UA) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": ua})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read().decode("utf-8", "replace")
 
@@ -154,6 +154,12 @@ def extract_exchange(text: str) -> str | None:
 # a ticker from the issuer name that leads most releases. The quote fetch then
 # still confirms exchange/price, so a mis-resolved name can't pass the screen blind.
 SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
+# SEC's fair-access policy requires a descriptive User-Agent with a contact.
+# Override via the SEC_UA env var with your own "name email" per SEC guidance.
+SEC_UA = os.environ.get(
+    "SEC_UA",
+    "claude-trading-skills stock-alert-monitor admin@claude-trading-skills.dev",
+)
 _NAME_SUFFIXES = {
     "inc", "incorporated", "corp", "corporation", "co", "company", "ltd",
     "limited", "plc", "sa", "ag", "nv", "llc", "lp", "holdings", "holding",
@@ -182,7 +188,7 @@ def load_issuer_map(cache_path: str, ttl: int = 86400, timeout: int = 20) -> dic
         if p.exists() and (time.time() - p.stat().st_mtime) < ttl:
             raw = p.read_text()
         else:
-            raw = _http_get(SEC_TICKERS_URL, timeout)
+            raw = _http_get(SEC_TICKERS_URL, timeout, ua=SEC_UA)
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(raw)
     except Exception as e:
