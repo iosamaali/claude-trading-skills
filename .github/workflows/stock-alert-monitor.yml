@@ -85,8 +85,9 @@ jobs:
             exit 1
           fi
           mkdir -p .cache
-          # Default (cron): strict micro-cap momentum screen, shared seen-state.
-          SCREEN=""
+          # Default (cron): micro/small-cap momentum screen, shared seen-state.
+          # Target names priced under $20 (skill default caps at $10).
+          SCREEN="--max-price 20"
           STATE=".cache/seen.txt"
           if [ "$LOOSE" = "true" ]; then
             # TEST mode (manual only): widen the screen, cap the burst, and use a
