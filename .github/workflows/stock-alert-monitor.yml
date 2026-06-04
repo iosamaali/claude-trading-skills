@@ -25,6 +25,10 @@ on:
         description: "Drop matches whose float/RVOL/%change can't be confirmed"
         type: boolean
         default: false
+      loose:
+        description: "TEST: loosen the screen (more alerts) to confirm delivery"
+        type: boolean
+        default: false
       equity:
         description: "Account equity for position sizing (USD)"
         type: string
@@ -74,17 +78,27 @@ jobs:
           ALERT_WEBHOOK: ${{ secrets.ALERT_WEBHOOK }}
           STRICT_FLAG: ${{ (inputs.strict && '--strict') || '--no-strict' }}
           EQUITY: ${{ inputs.equity || '25000' }}
+          LOOSE: ${{ inputs.loose && 'true' || 'false' }}
         run: |
           if [ -z "$ALERT_WEBHOOK" ]; then
             echo "::error::ALERT_WEBHOOK secret is not set — add it under Settings > Secrets > Actions"
             exit 1
           fi
           mkdir -p .cache
+          # Default (cron): strict micro-cap momentum screen, shared seen-state.
+          SCREEN=""
+          STATE=".cache/seen.txt"
+          if [ "$LOOSE" = "true" ]; then
+            # TEST mode (manual only): widen the screen, cap the burst, and use a
+            # separate seen-state so it doesn't disturb the strict cron's dedup.
+            SCREEN="--min-change-pct 3 --min-rel-vol 1 --min-avg-vol 100000 --max-float 500000000 --max-price 15 --max-alerts 8"
+            STATE=".cache/seen-loose.txt"
+          fi
           # --no-strict by default so keyword+price matches still alert even when
           # the runner can't fetch float/RVOL/%change; flip via "Run workflow".
           python skills/stock-alert-monitor/monitor.py \
-            --once $STRICT_FLAG \
+            --once $STRICT_FLAG $SCREEN \
             --equity "$EQUITY" \
-            --state .cache/seen.txt \
+            --state "$STATE" \
             --issuer-cache .cache/company_tickers.json \
             --webhook "$ALERT_WEBHOOK"
