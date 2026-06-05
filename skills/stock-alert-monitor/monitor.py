@@ -418,8 +418,19 @@ def format_trade_signal(ticker: str, q: dict, args, title: str = "", link: str =
     return {"text": "\n".join(lines), "levels": L}
 
 
-def notify_webhook(url: str, payload: dict) -> None:
-    body = json.dumps({"text": payload["text"]}).encode()
+def _mention_str(m: str) -> str:
+    m = m.strip().lstrip("@")
+    if m in ("channel", "here", "everyone"):
+        return f"<!{m}>"
+    return f"<@{m}>"
+
+
+def notify_webhook(url: str, payload: dict, mention: str | None = None) -> None:
+    text = payload["text"]
+    # @-mention on 🔥 hot (3x-runner) alerts so Slack actually pushes them on-spot
+    if mention and (payload.get("levels") or {}).get("hot"):
+        text = f"{_mention_str(mention)} {text}"
+    body = json.dumps({"text": text}).encode()
     req = urllib.request.Request(
         url, data=body, headers={"Content-Type": "application/json", "User-Agent": UA}
     )
@@ -483,7 +494,7 @@ def run_pass(args, seen: set, webhook: str | None, issuer_map: dict | None = Non
             }
             print(json.dumps(match), flush=True)
             if webhook:
-                notify_webhook(webhook, match)
+                notify_webhook(webhook, match, args.mention)
             if args.max_alerts and new_count >= args.max_alerts:
                 return new_count  # cap reached; remaining items stay unseen for next pass
     return new_count
@@ -561,6 +572,8 @@ def main() -> int:
                    help="seconds before refreshing the SEC issuer map")
     p.add_argument("--timeout", type=int, default=20)
     p.add_argument("--webhook", default=os.environ.get("ALERT_WEBHOOK"))
+    p.add_argument("--mention", default=os.environ.get("ALERT_MENTION"),
+                   help="Slack member id (or 'channel'/'here') to @-mention on 🔥 hot alerts")
     p.add_argument("--state", default=os.path.expanduser(
         "~/.cache/stock-alert-monitor/seen.txt"))
     p.add_argument("--once", action="store_true", help="single pass then exit")

@@ -13,9 +13,9 @@ name: stock-alert-monitor
 
 on:
   schedule:
-    # weekdays: every 15 min, all hours — covers pre-market, regular session,
+    # weekdays: every 10 min, all hours — covers pre-market, regular session,
     # and after-hours (catalysts frequently drop pre-open and after the close).
-    - cron: "*/15 * * * 1-5"
+    - cron: "*/10 * * * 1-5"
     # weekends: hourly — catch weekend M&A / deal announcements.
     - cron: "0 * * * 0,6"
     # NOTE: GitHub runs schedules in UTC and may delay them under load.
@@ -76,6 +76,9 @@ jobs:
       - name: Scan + alert
         env:
           ALERT_WEBHOOK: ${{ secrets.ALERT_WEBHOOK }}
+          # Slack member id to @-mention on 🔥 hot (3x-runner) alerts so they push
+          # on-spot. Override by setting an ALERT_MENTION repo variable.
+          ALERT_MENTION: ${{ vars.ALERT_MENTION || 'U0B7N3Y20VC' }}
           STRICT_FLAG: ${{ (inputs.strict && '--strict') || '--no-strict' }}
           EQUITY: ${{ inputs.equity || '25000' }}
           LOOSE: ${{ inputs.loose && 'true' || 'false' }}
@@ -101,4 +104,5 @@ jobs:
             --equity "$EQUITY" \
             --state "$STATE" \
             --issuer-cache .cache/company_tickers.json \
+            --mention "$ALERT_MENTION" \
             --webhook "$ALERT_WEBHOOK"
