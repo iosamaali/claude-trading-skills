@@ -37,7 +37,7 @@ when the quote feed is partially blocked.
 
 - You want a hands-off, always-on watcher for catalyst-driven moves in cheap stocks
 - You trade micro/small caps where a single press release moves the tape
-- You need de-duplicated, near-real-time alerts pushed to chat, phone, or a webhook
+- You need de-duplicated, near-real-time alerts pushed to chat, phone, or a Telegram bot
 
 ## How It Works
 
@@ -69,8 +69,11 @@ Key flags (screen flags are in the table above):
 | `--strict/--no-strict` | strict | Drop (or allow) candidates whose screen metrics can't be confirmed |
 | `--quotes/--no-quotes` | on | Fetch live price/volume/float per ticker |
 | `--resolve-names/--no-resolve-names` | on | Resolve ticker from issuer name via SEC `company_tickers.json` |
-| `--webhook URL` | `$ALERT_WEBHOOK` | POST each match to Slack/Discord-style webhook |
+| `--telegram-token T` | `$ALERT_TELEGRAM_TOKEN` | Telegram bot token (from @BotFather) to push each match |
+| `--telegram-chat-id ID` | `$ALERT_TELEGRAM_CHAT_ID` | Telegram chat/group/channel id to send alerts to |
+| `--mention @user` | `$ALERT_MENTION` | Telegram @username to mention on 🔥 hot (3x-runner) alerts |
 | `--once` | off | Single pass then exit (for cron or `/loop`) |
+| `--test-ping` | off | Send one test message to Telegram and exit (verify token + chat id) |
 | `--state PATH` | `~/.cache/stock-alert-monitor/seen.txt` | De-dup memory |
 | `--equity N` | `25000` | Account equity for position sizing (`0` disables) |
 | `--alloc-pct P` | `10` | % of equity to allocate per position |
@@ -94,8 +97,14 @@ match becomes a chat/phone notification:
 Each stdout JSON line fires one notification. The script keeps running across the
 session and de-dupes via the state file.
 
-**Standalone:** `cron`, `systemd`, or `nohup python monitor.py &`. Point `--webhook`
-at Slack/Discord to get pushes, or read the JSONL stdout in your own pipeline.
+**Standalone:** `cron`, `systemd`, or `nohup python monitor.py &`. Set
+`--telegram-token` + `--telegram-chat-id` (or the `ALERT_TELEGRAM_TOKEN` /
+`ALERT_TELEGRAM_CHAT_ID` env vars) to push each match to a Telegram bot, or read
+the JSONL stdout in your own pipeline. Create the bot with @BotFather to get the
+token; get the chat id by messaging the bot and reading
+`https://api.telegram.org/bot<token>/getUpdates` (or use a chat-id helper bot).
+Non-hot signals arrive silently; 🔥 3x-runner alerts push with sound and
+@-mention `--mention` so they ping on-spot.
 
 **Via the `/loop` skill (when shell egress is blocked):** in sandboxes where the
 shell can't reach news hosts, run a recurring agent turn instead — each iteration

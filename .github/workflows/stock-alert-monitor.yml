@@ -1,13 +1,16 @@
 name: stock-alert-monitor
 
 # Persistent catalyst monitor that runs OFF any Claude session, on GitHub's
-# runners (which have open network egress), and POSTs new matches to Slack via
-# an incoming webhook stored as the repo secret SLACK_WEBHOOK.
+# runners (which have open network egress), and pushes new matches to a Telegram
+# bot via the Telegram Bot API.
 #
 # Setup (one time):
-#   Settings -> Secrets and variables -> Actions -> New repository secret
-#     Name:  ALERT_WEBHOOK
-#     Value: https://hooks.slack.com/services/XXX/YYY/ZZZ
+#   1. Create a bot with @BotFather and copy its token.
+#   2. Get your chat id: message the bot, then open
+#      https://api.telegram.org/bot<token>/getUpdates and read result[].message.chat.id
+#   3. Settings -> Secrets and variables -> Actions -> New repository secret
+#        Name: ALERT_TELEGRAM_TOKEN    Value: <bot token>
+#        Name: ALERT_TELEGRAM_CHAT_ID  Value: <chat id>
 #
 # Trigger it by schedule (below) or manually via "Run workflow".
 
@@ -27,6 +30,10 @@ on:
         default: false
       loose:
         description: "TEST: loosen the screen (more alerts) to confirm delivery"
+        type: boolean
+        default: false
+      test_ping:
+        description: "TEST: send one Telegram test message and exit (verify delivery)"
         type: boolean
         default: false
       equity:
@@ -75,17 +82,27 @@ jobs:
 
       - name: Scan + alert
         env:
-          ALERT_WEBHOOK: ${{ secrets.ALERT_WEBHOOK }}
-          # Slack member id to @-mention on 🔥 hot (3x-runner) alerts so they push
+          ALERT_TELEGRAM_TOKEN: ${{ secrets.ALERT_TELEGRAM_TOKEN }}
+          ALERT_TELEGRAM_CHAT_ID: ${{ secrets.ALERT_TELEGRAM_CHAT_ID }}
+          # Telegram @username to mention on 🔥 hot (3x-runner) alerts so they push
           # on-spot. Override by setting an ALERT_MENTION repo variable.
-          ALERT_MENTION: ${{ vars.ALERT_MENTION || 'U0B7N3Y20VC' }}
+          ALERT_MENTION: ${{ vars.ALERT_MENTION || '' }}
           STRICT_FLAG: ${{ (inputs.strict && '--strict') || '--no-strict' }}
           EQUITY: ${{ inputs.equity || '25000' }}
           LOOSE: ${{ inputs.loose && 'true' || 'false' }}
+          TEST_PING: ${{ inputs.test_ping && 'true' || 'false' }}
         run: |
-          if [ -z "$ALERT_WEBHOOK" ]; then
-            echo "::error::ALERT_WEBHOOK secret is not set — add it under Settings > Secrets > Actions"
+          if [ -z "$ALERT_TELEGRAM_TOKEN" ] || [ -z "$ALERT_TELEGRAM_CHAT_ID" ]; then
+            echo "::error::ALERT_TELEGRAM_TOKEN / ALERT_TELEGRAM_CHAT_ID secrets are not set — add them under Settings > Secrets > Actions"
             exit 1
+          fi
+          # TEST mode (manual only): just confirm Telegram delivery, then exit.
+          if [ "$TEST_PING" = "true" ]; then
+            python skills/stock-alert-monitor/monitor.py --test-ping \
+              --telegram-token "$ALERT_TELEGRAM_TOKEN" \
+              --telegram-chat-id "$ALERT_TELEGRAM_CHAT_ID" \
+              --mention "$ALERT_MENTION"
+            exit $?
           fi
           mkdir -p .cache
           # Default (cron): strict micro-cap momentum screen, shared seen-state.
@@ -105,4 +122,5 @@ jobs:
             --state "$STATE" \
             --issuer-cache .cache/company_tickers.json \
             --mention "$ALERT_MENTION" \
-            --webhook "$ALERT_WEBHOOK"
+            --telegram-token "$ALERT_TELEGRAM_TOKEN" \
+            --telegram-chat-id "$ALERT_TELEGRAM_CHAT_ID"
