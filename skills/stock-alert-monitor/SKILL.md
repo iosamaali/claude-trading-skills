@@ -73,6 +73,7 @@ Key flags (screen flags are in the table above):
 | `--telegram-chat-id ID` | `$ALERT_TELEGRAM_CHAT_ID` | Telegram chat/group/channel id to send alerts to |
 | `--mention @user` | `$ALERT_MENTION` | Telegram @username to mention on 🔥 hot (3x-runner) alerts |
 | `--once` | off | Single pass then exit (for cron or `/loop`) |
+| `--test-ping` | off | Send one test message to Telegram and exit (verify token + chat id) |
 | `--state PATH` | `~/.cache/stock-alert-monitor/seen.txt` | De-dup memory |
 | `--equity N` | `25000` | Account equity for position sizing (`0` disables) |
 | `--alloc-pct P` | `10` | % of equity to allocate per position |

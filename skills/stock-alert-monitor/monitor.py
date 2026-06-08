@@ -40,6 +40,7 @@ Usage
     python monitor.py --once                # single pass (good for /loop or cron)
     python monitor.py --no-strict           # keyword/price only when quotes blocked
     python monitor.py --telegram-token 123:ABC --telegram-chat-id -1001234567890
+    python monitor.py --test-ping           # verify Telegram setup, then exit
 
 Exit: runs forever unless --once is given. Ctrl-C / SIGTERM to stop.
 """
@@ -425,7 +426,7 @@ def _mention_str(m: str) -> str:
 
 def notify_telegram(
     token: str, chat_id: str, payload: dict, mention: str | None = None
-) -> None:
+) -> bool:
     text = payload["text"]
     hot = bool((payload.get("levels") or {}).get("hot"))
     # @-mention the configured username on 🔥 hot (3x-runner) alerts
@@ -445,8 +446,10 @@ def notify_telegram(
     )
     try:
         urllib.request.urlopen(req, timeout=10).read()
+        return True
     except Exception as e:  # telegram failure must not kill the monitor
         print(f"# telegram error: {e}", file=sys.stderr, flush=True)
+        return False
 
 
 def run_pass(args, seen: set, issuer_map: dict | None = None) -> int:
@@ -591,9 +594,30 @@ def main() -> int:
     p.add_argument("--state", default=os.path.expanduser(
         "~/.cache/stock-alert-monitor/seen.txt"))
     p.add_argument("--once", action="store_true", help="single pass then exit")
+    p.add_argument("--test-ping", action="store_true",
+                   help="send one test message to Telegram and exit (verify setup)")
     p.add_argument("--max-alerts", type=int, default=0,
                    help="cap alerts emitted per pass (0 = unlimited)")
     args = p.parse_args()
+
+    if args.test_ping:
+        if not (args.telegram_token and args.telegram_chat_id):
+            print("# --test-ping needs --telegram-token and --telegram-chat-id "
+                  "(or ALERT_TELEGRAM_TOKEN / ALERT_TELEGRAM_CHAT_ID)",
+                  file=sys.stderr, flush=True)
+            return 2
+        payload = {
+            "text": ("✅ stock-alert-monitor: Telegram delivery is live. "
+                     "🔥 hot 3x-runner alerts will ping with sound; other "
+                     "signals arrive silently."),
+            "levels": {"hot": True},  # send loud so you feel the test ping
+        }
+        ok = notify_telegram(
+            args.telegram_token, args.telegram_chat_id, payload, args.mention
+        )
+        print(f"# test-ping {'sent ✅' if ok else 'FAILED ❌'}",
+              file=sys.stderr, flush=True)
+        return 0 if ok else 1
 
     state = Path(args.state)
     seen = load_seen(state)
