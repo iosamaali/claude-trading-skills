@@ -6,7 +6,7 @@ headline for catalysts (FDA/approval, contract, earnings, patent, partnership,
 acquisition/merger), pulls a live quote, applies a quantitative momentum screen
 (price band, float, average & relative volume, daily % change), de-duplicates
 against headlines already seen, and emits one line per NEW match on stdout. It
-can also push each match to a Slack/Discord-style webhook.
+can also push each match to a Telegram bot (private chat, group, or channel).
 
 Default screen (override via flags)
 -----------------------------------
@@ -39,7 +39,7 @@ Usage
     python monitor.py --interval 120
     python monitor.py --once                # single pass (good for /loop or cron)
     python monitor.py --no-strict           # keyword/price only when quotes blocked
-    python monitor.py --webhook https://hooks.slack.com/services/XXX
+    python monitor.py --telegram-token 123:ABC --telegram-chat-id -1001234567890
 
 Exit: runs forever unless --once is given. Ctrl-C / SIGTERM to stop.
 """
@@ -419,28 +419,37 @@ def format_trade_signal(ticker: str, q: dict, args, title: str = "", link: str =
 
 
 def _mention_str(m: str) -> str:
-    m = m.strip().lstrip("@")
-    if m in ("channel", "here", "everyone"):
-        return f"<!{m}>"
-    return f"<@{m}>"
+    # Telegram @-mention: a bare username, normalized to a single leading '@'.
+    return "@" + m.strip().lstrip("@")
 
 
-def notify_webhook(url: str, payload: dict, mention: str | None = None) -> None:
+def notify_telegram(
+    token: str, chat_id: str, payload: dict, mention: str | None = None
+) -> None:
     text = payload["text"]
-    # @-mention on 🔥 hot (3x-runner) alerts so Slack actually pushes them on-spot
-    if mention and (payload.get("levels") or {}).get("hot"):
+    hot = bool((payload.get("levels") or {}).get("hot"))
+    # @-mention the configured username on 🔥 hot (3x-runner) alerts
+    if mention and hot:
         text = f"{_mention_str(mention)} {text}"
-    body = json.dumps({"text": text}).encode()
+    body = json.dumps({
+        "chat_id": chat_id,
+        "text": text,
+        "disable_web_page_preview": True,
+        # Telegram notifies by default; keep non-hot alerts silent so only the
+        # 🔥 3x-runner signals buzz the phone on-spot (non-hot stays quiet).
+        "disable_notification": not hot,
+    }).encode()
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
     req = urllib.request.Request(
         url, data=body, headers={"Content-Type": "application/json", "User-Agent": UA}
     )
     try:
         urllib.request.urlopen(req, timeout=10).read()
-    except Exception as e:  # webhook failure must not kill the monitor
-        print(f"# webhook error: {e}", file=sys.stderr, flush=True)
+    except Exception as e:  # telegram failure must not kill the monitor
+        print(f"# telegram error: {e}", file=sys.stderr, flush=True)
 
 
-def run_pass(args, seen: set, webhook: str | None, issuer_map: dict | None = None) -> int:
+def run_pass(args, seen: set, issuer_map: dict | None = None) -> int:
     new_count = 0
     for feed in args.feeds:
         try:
@@ -493,8 +502,10 @@ def run_pass(args, seen: set, webhook: str | None, issuer_map: dict | None = Non
                 "text": sig["text"],
             }
             print(json.dumps(match), flush=True)
-            if webhook:
-                notify_webhook(webhook, match, args.mention)
+            if args.telegram_token and args.telegram_chat_id:
+                notify_telegram(
+                    args.telegram_token, args.telegram_chat_id, match, args.mention
+                )
             if args.max_alerts and new_count >= args.max_alerts:
                 return new_count  # cap reached; remaining items stay unseen for next pass
     return new_count
@@ -571,9 +582,12 @@ def main() -> int:
     p.add_argument("--issuer-ttl", type=int, default=86400,
                    help="seconds before refreshing the SEC issuer map")
     p.add_argument("--timeout", type=int, default=20)
-    p.add_argument("--webhook", default=os.environ.get("ALERT_WEBHOOK"))
+    p.add_argument("--telegram-token", default=os.environ.get("ALERT_TELEGRAM_TOKEN"),
+                   help="Telegram bot token (from @BotFather) for push alerts")
+    p.add_argument("--telegram-chat-id", default=os.environ.get("ALERT_TELEGRAM_CHAT_ID"),
+                   help="Telegram chat/group/channel id to send alerts to")
     p.add_argument("--mention", default=os.environ.get("ALERT_MENTION"),
-                   help="Slack member id (or 'channel'/'here') to @-mention on 🔥 hot alerts")
+                   help="Telegram @username to mention on 🔥 hot (3x-runner) alerts")
     p.add_argument("--state", default=os.path.expanduser(
         "~/.cache/stock-alert-monitor/seen.txt"))
     p.add_argument("--once", action="store_true", help="single pass then exit")
@@ -599,7 +613,7 @@ def main() -> int:
 
     try:
         while True:
-            n = run_pass(args, seen, args.webhook, issuer_map)
+            n = run_pass(args, seen, issuer_map)
             save_seen(state, seen)
             if args.once:
                 print(f"# pass complete, {n} new match(es)", file=sys.stderr, flush=True)
