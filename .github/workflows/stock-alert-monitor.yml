@@ -32,6 +32,10 @@ on:
         description: "TEST: loosen the screen (more alerts) to confirm delivery"
         type: boolean
         default: false
+      test_ping:
+        description: "TEST: send one Telegram test message and exit (verify delivery)"
+        type: boolean
+        default: false
       equity:
         description: "Account equity for position sizing (USD)"
         type: string
@@ -86,10 +90,19 @@ jobs:
           STRICT_FLAG: ${{ (inputs.strict && '--strict') || '--no-strict' }}
           EQUITY: ${{ inputs.equity || '25000' }}
           LOOSE: ${{ inputs.loose && 'true' || 'false' }}
+          TEST_PING: ${{ inputs.test_ping && 'true' || 'false' }}
         run: |
           if [ -z "$ALERT_TELEGRAM_TOKEN" ] || [ -z "$ALERT_TELEGRAM_CHAT_ID" ]; then
             echo "::error::ALERT_TELEGRAM_TOKEN / ALERT_TELEGRAM_CHAT_ID secrets are not set — add them under Settings > Secrets > Actions"
             exit 1
+          fi
+          # TEST mode (manual only): just confirm Telegram delivery, then exit.
+          if [ "$TEST_PING" = "true" ]; then
+            python skills/stock-alert-monitor/monitor.py --test-ping \
+              --telegram-token "$ALERT_TELEGRAM_TOKEN" \
+              --telegram-chat-id "$ALERT_TELEGRAM_CHAT_ID" \
+              --mention "$ALERT_MENTION"
+            exit $?
           fi
           mkdir -p .cache
           # Default (cron): strict micro-cap momentum screen, shared seen-state.
