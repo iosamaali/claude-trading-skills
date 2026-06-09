@@ -64,7 +64,9 @@ Key flags (screen flags are in the table above):
 
 | Flag | Default | Purpose |
 |------|---------|---------|
-| `--feeds URL ...` | M&A + biotech feeds | News sources to poll (use ones reachable from your network) |
+| `--feeds URL ...` | M&A + biotech feeds | RSS/Atom sources to poll (use ones reachable from your network) |
+| `--finnhub-token T` | `$FINNHUB_API_KEY` | Finnhub news API key — a **CI/datacenter-reachable** source (the PR-wire RSS feeds 403 server IPs) |
+| `--finnhub-category C` | `general` | Finnhub news category (`general`, `merger`, `forex`, `crypto`) |
 | `--interval N` | `300` | Seconds between polls |
 | `--strict/--no-strict` | strict | Drop (or allow) candidates whose screen metrics can't be confirmed |
 | `--quotes/--no-quotes` | on | Fetch live price/volume/float per ticker |
@@ -113,9 +115,14 @@ does a `WebSearch` for fresh catalysts and a `PushNotification` on new matches. 
 
 ## Network Notes
 
-The script needs outbound access to your news feed hosts and (for `--quotes`) to
-`query1.finance.yahoo.com`. Some managed/sandboxed environments allowlist egress;
-run it where those hosts are reachable, or swap `--feeds` for a source you can hit.
+The script needs outbound access to your news source and (for `--quotes`) to
+`query1.finance.yahoo.com`. **Important:** the default PR-wire RSS feeds
+(GlobeNewswire/BusinessWire) **return HTTP 403 to datacenter/CI IPs**, so on
+GitHub runners (or any cloud host) they yield 0 items and nothing can match.
+For server-side use, set `--finnhub-token` (or the `FINNHUB_API_KEY` env var) —
+Finnhub is a JSON news API built for programmatic access and stays reachable from
+CI. The bundled GitHub Actions workflow wires this in via the `FINNHUB_API_KEY`
+repo secret. On a residential connection the RSS feeds work directly.
 
 ## Output: staged TRADE SIGNAL
 

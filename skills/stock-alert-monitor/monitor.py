@@ -54,6 +54,7 @@ import sys
 import time
 import urllib.request
 import urllib.error
+import urllib.parse
 from html import unescape
 from pathlib import Path
 
@@ -129,6 +130,43 @@ def parse_feed(xml: str) -> list[dict]:
         link = _field(block, "link")
         summary = _field(block, "description") or _field(block, "summary")
         out.append({"title": title, "link": link, "summary": summary})
+    return out
+
+
+def fetch_finnhub_news(token: str, category: str = "general", timeout: int = 20) -> list[dict]:
+    """Pull market news from Finnhub's REST API as items in the same shape as
+    parse_feed. Unlike the PR-wire RSS feeds (GlobeNewswire/BusinessWire), Finnhub
+    is a JSON API built for programmatic access, so it doesn't 403 datacenter/CI
+    IPs — the reliable source when running on GitHub runners. Its `related` field
+    gives an authoritative ticker when present, sidestepping name resolution."""
+    url = (
+        "https://finnhub.io/api/v1/news?category="
+        f"{urllib.parse.quote(category)}&token={urllib.parse.quote(token)}"
+    )
+    try:
+        data = json.loads(_http_get(url, timeout))
+    except Exception as e:
+        print(f"# finnhub error: {e}", file=sys.stderr, flush=True)
+        return []
+    out = []
+    for a in data if isinstance(data, list) else []:
+        title = (a.get("headline") or "").strip()
+        if not title:
+            continue
+        # `related` is a comma/semicolon-separated symbol list; take the first
+        # clean US ticker as the authoritative symbol for this article.
+        ticker = None
+        for sym in (a.get("related") or "").replace(";", ",").split(","):
+            sym = sym.strip().upper()
+            if re.fullmatch(r"[A-Z]{1,5}", sym):
+                ticker = sym
+                break
+        out.append({
+            "title": title,
+            "link": (a.get("url") or "").strip(),
+            "summary": (a.get("summary") or "").strip(),
+            "ticker": ticker,
+        })
     return out
 
 
@@ -454,63 +492,73 @@ def notify_telegram(
 
 def run_pass(args, seen: set, issuer_map: dict | None = None) -> int:
     new_count = 0
+    # Gather candidate items from every source: RSS/Atom feeds + (when configured)
+    # the Finnhub REST news API, which stays reachable from CI/datacenter IPs.
+    items: list[dict] = []
     for feed in args.feeds:
         try:
             xml = _http_get(feed, timeout=args.timeout)
         except Exception as e:
             print(f"# feed error {feed}: {e}", file=sys.stderr, flush=True)
             continue
-        for item in parse_feed(xml):
-            key = item["link"] or item["title"]
-            if key in seen:
-                continue
-            text = f"{item['title']} {item['summary']}"
-            cats = classify(text)
-            if not cats:
-                seen.add(key)
-                continue
-            ticker = extract_ticker(text)
-            if not ticker and args.resolve_names:
-                ticker = resolve_ticker_from_name(item["title"], issuer_map or {})
-            # require a resolved ticker — a headline with no ticker can't be quoted,
-            # screened, or sized, so it isn't an actionable trade signal.
-            if not ticker:
-                seen.add(key)
-                continue
-            # cheap NASDAQ-only prefilter when the headline names the exchange
-            if args.nasdaq_only:
-                exch = extract_exchange(text)
-                if exch and exch != "NASDAQ":
-                    seen.add(key)
-                    continue
-            # require a confirmed quote with a price — otherwise the screen can't run
-            quote = fetch_quote(ticker) if args.quotes else None
-            if not quote or quote.get("price") is None:
-                seen.add(key)
-                continue
-            if not passes_screen(quote, args):
-                seen.add(key)
-                continue
+        items.extend(parse_feed(xml))
+    if getattr(args, "finnhub_token", ""):
+        items.extend(fetch_finnhub_news(
+            args.finnhub_token, args.finnhub_category, args.timeout))
+
+    for item in items:
+        key = item.get("link") or item["title"]
+        if key in seen:
+            continue
+        text = f"{item['title']} {item.get('summary', '')}"
+        cats = classify(text)
+        if not cats:
             seen.add(key)
-            new_count += 1
-            sig = format_trade_signal(ticker, quote, args, item["title"], item["link"])
-            match = {
-                "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "ticker": ticker,
-                "catalysts": cats,
-                "title": item["title"],
-                "link": item["link"],
-                "quote": quote,
-                "levels": sig["levels"],
-                "text": sig["text"],
-            }
-            print(json.dumps(match), flush=True)
-            if args.telegram_token and args.telegram_chat_id:
-                notify_telegram(
-                    args.telegram_token, args.telegram_chat_id, match, args.mention
-                )
-            if args.max_alerts and new_count >= args.max_alerts:
-                return new_count  # cap reached; remaining items stay unseen for next pass
+            continue
+        # prefer a source-provided authoritative ticker (e.g. Finnhub `related`),
+        # then the headline's embedded "(Nasdaq: XYZ)"/"$XYZ", then SEC name lookup
+        ticker = item.get("ticker") or extract_ticker(text)
+        if not ticker and args.resolve_names:
+            ticker = resolve_ticker_from_name(item["title"], issuer_map or {})
+        # require a resolved ticker — a headline with no ticker can't be quoted,
+        # screened, or sized, so it isn't an actionable trade signal.
+        if not ticker:
+            seen.add(key)
+            continue
+        # cheap NASDAQ-only prefilter when the headline names the exchange
+        if args.nasdaq_only:
+            exch = extract_exchange(text)
+            if exch and exch != "NASDAQ":
+                seen.add(key)
+                continue
+        # require a confirmed quote with a price — otherwise the screen can't run
+        quote = fetch_quote(ticker) if args.quotes else None
+        if not quote or quote.get("price") is None:
+            seen.add(key)
+            continue
+        if not passes_screen(quote, args):
+            seen.add(key)
+            continue
+        seen.add(key)
+        new_count += 1
+        sig = format_trade_signal(ticker, quote, args, item["title"], item.get("link", ""))
+        match = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "ticker": ticker,
+            "catalysts": cats,
+            "title": item["title"],
+            "link": item.get("link", ""),
+            "quote": quote,
+            "levels": sig["levels"],
+            "text": sig["text"],
+        }
+        print(json.dumps(match), flush=True)
+        if args.telegram_token and args.telegram_chat_id:
+            notify_telegram(
+                args.telegram_token, args.telegram_chat_id, match, args.mention
+            )
+        if args.max_alerts and new_count >= args.max_alerts:
+            return new_count  # cap reached; remaining items stay unseen for next pass
     return new_count
 
 
@@ -530,6 +578,12 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--feeds", nargs="+", default=DEFAULT_FEEDS)
+    p.add_argument("--finnhub-token", default=os.environ.get("FINNHUB_API_KEY", ""),
+                   help="Finnhub API key (env FINNHUB_API_KEY). Adds Finnhub's news "
+                        "API as a source — reachable from CI/datacenter IPs, unlike "
+                        "the PR-wire RSS feeds which 403 those IPs")
+    p.add_argument("--finnhub-category", default="general",
+                   help="Finnhub news category (general, merger, forex, crypto)")
     p.add_argument("--interval", type=int, default=300, help="poll seconds")
     # --- quantitative screen (defaults = the standing momentum criteria) ---
     p.add_argument("--min-price", type=float, default=0.10,
