@@ -506,9 +506,12 @@ def run_pass(args, seen: set, issuer_map: dict | None = None) -> int:
         n_rss += len(parsed)
         items.extend(parsed)
     if getattr(args, "finnhub_token", ""):
-        fh = fetch_finnhub_news(args.finnhub_token, args.finnhub_category, args.timeout)
-        n_finnhub = len(fh)
-        items.extend(fh)
+        # --finnhub-category accepts a comma-separated list so one pass can sweep
+        # several feeds (e.g. "general,merger" to catch broad catalysts + M&A).
+        for cat in [c.strip() for c in args.finnhub_category.split(",") if c.strip()]:
+            fh = fetch_finnhub_news(args.finnhub_token, cat, args.timeout)
+            n_finnhub += len(fh)
+            items.extend(fh)
 
     # funnel telemetry: where candidates drop, so a quiet pass vs a blocked quote
     # feed vs a too-tight screen is diagnosable straight from the logs.
@@ -599,7 +602,9 @@ def main() -> int:
                         "API as a source — reachable from CI/datacenter IPs, unlike "
                         "the PR-wire RSS feeds which 403 those IPs")
     p.add_argument("--finnhub-category", default="general",
-                   help="Finnhub news category (general, merger, forex, crypto)")
+                   help="Finnhub news category, or comma-separated list to sweep "
+                        "several (e.g. 'general,merger'). Options: general, merger, "
+                        "forex, crypto")
     p.add_argument("--interval", type=int, default=300, help="poll seconds")
     # --- quantitative screen (defaults = the standing momentum criteria) ---
     p.add_argument("--min-price", type=float, default=0.10,

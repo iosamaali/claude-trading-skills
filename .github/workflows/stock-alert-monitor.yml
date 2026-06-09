@@ -46,8 +46,8 @@ on:
       finnhub_category:
         description: "Finnhub news category to scan"
         type: choice
-        options: ["general", "merger"]
-        default: "general"
+        options: ["general,merger", "general", "merger"]
+        default: "general,merger"
 
 permissions:
   contents: read
@@ -105,7 +105,8 @@ jobs:
           EQUITY: ${{ inputs.equity || '25000' }}
           LOOSE: ${{ inputs.loose && 'true' || 'false' }}
           TEST_PING: ${{ inputs.test_ping && 'true' || 'false' }}
-          FINNHUB_CATEGORY: ${{ inputs.finnhub_category || 'general' }}
+          # scheduled runs (no inputs) sweep both broad catalysts and M&A
+          FINNHUB_CATEGORY: ${{ inputs.finnhub_category || 'general,merger' }}
         run: |
           if [ -z "$ALERT_TELEGRAM_TOKEN" ] || [ -z "$ALERT_TELEGRAM_CHAT_ID" ]; then
             echo "::error::ALERT_TELEGRAM_TOKEN / ALERT_TELEGRAM_CHAT_ID secrets are not set — add them under Settings > Secrets > Actions"
