@@ -8,9 +8,12 @@ name: stock-alert-monitor
 #   1. Create a bot with @BotFather and copy its token.
 #   2. Get your chat id: message the bot, then open
 #      https://api.telegram.org/bot<token>/getUpdates and read result[].message.chat.id
-#   3. Settings -> Secrets and variables -> Actions -> New repository secret
+#   3. Get a free Finnhub API key at https://finnhub.io (the news source — the
+#      PR-wire RSS feeds 403 GitHub runner IPs, so a key is required for matches).
+#   4. Settings -> Secrets and variables -> Actions -> New repository secret
 #        Name: ALERT_TELEGRAM_TOKEN    Value: <bot token>
 #        Name: ALERT_TELEGRAM_CHAT_ID  Value: <chat id>
+#        Name: FINNHUB_API_KEY         Value: <finnhub key>
 #
 # Trigger it by schedule (below) or manually via "Run workflow".
 
@@ -84,6 +87,12 @@ jobs:
         env:
           ALERT_TELEGRAM_TOKEN: ${{ secrets.ALERT_TELEGRAM_TOKEN }}
           ALERT_TELEGRAM_CHAT_ID: ${{ secrets.ALERT_TELEGRAM_CHAT_ID }}
+          # Finnhub news API key — the CI-reachable news source. The PR-wire RSS
+          # feeds (GlobeNewswire/BusinessWire) 403 GitHub's runner IPs and yield 0
+          # items, so without this the scan has nothing to match. Add it under
+          # Settings > Secrets > Actions as FINNHUB_API_KEY (free tier at finnhub.io).
+          # monitor.py reads it automatically from the environment.
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           # Telegram @username to mention on 🔥 hot (3x-runner) alerts so they push
           # on-spot. Override by setting an ALERT_MENTION repo variable.
           ALERT_MENTION: ${{ vars.ALERT_MENTION || '' }}
@@ -104,14 +113,20 @@ jobs:
               --mention "$ALERT_MENTION"
             exit $?
           fi
+          if [ -z "$FINNHUB_API_KEY" ]; then
+            echo "::warning::FINNHUB_API_KEY secret is not set — the PR-wire RSS feeds 403 GitHub runner IPs, so the scan will likely find 0 items. Add a free key from finnhub.io under Settings > Secrets > Actions to get real alerts."
+          fi
           mkdir -p .cache
           # Default (cron): strict micro-cap momentum screen, shared seen-state.
           SCREEN=""
           STATE=".cache/seen.txt"
           if [ "$LOOSE" = "true" ]; then
-            # TEST mode (manual only): widen the screen, cap the burst, and use a
-            # separate seen-state so it doesn't disturb the strict cron's dedup.
-            SCREEN="--min-change-pct 3 --min-rel-vol 1 --min-avg-vol 100000 --max-float 500000000 --max-price 15 --max-alerts 8"
+            # TEST mode (manual only): drop the momentum gates to keyword+ticker
+            # only (0 disables each gate) across any exchange and the full sub-$20
+            # universe, so a real qualifying press release pushes on the next pass.
+            # Cap the burst and use a separate seen-state so it doesn't disturb the
+            # strict cron's dedup.
+            SCREEN="--any-exchange --min-change-pct 0 --min-rel-vol 0 --min-avg-vol 0 --max-float 0 --max-price 20 --max-alerts 3"
             STATE=".cache/seen-loose.txt"
           fi
           # --no-strict by default so keyword+price matches still alert even when
