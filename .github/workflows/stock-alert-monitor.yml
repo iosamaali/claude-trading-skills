@@ -109,9 +109,12 @@ jobs:
           SCREEN=""
           STATE=".cache/seen.txt"
           if [ "$LOOSE" = "true" ]; then
-            # TEST mode (manual only): widen the screen, cap the burst, and use a
-            # separate seen-state so it doesn't disturb the strict cron's dedup.
-            SCREEN="--min-change-pct 3 --min-rel-vol 1 --min-avg-vol 100000 --max-float 500000000 --max-price 15 --max-alerts 8"
+            # TEST mode (manual only): drop the momentum gates to keyword+ticker
+            # only (0 disables each gate) across any exchange and the full sub-$20
+            # universe, so a real qualifying press release pushes on the next pass.
+            # Cap the burst and use a separate seen-state so it doesn't disturb the
+            # strict cron's dedup.
+            SCREEN="--any-exchange --min-change-pct 0 --min-rel-vol 0 --min-avg-vol 0 --max-float 0 --max-price 20 --max-alerts 3"
             STATE=".cache/seen-loose.txt"
           fi
           # --no-strict by default so keyword+price matches still alert even when
