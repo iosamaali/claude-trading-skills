@@ -99,8 +99,9 @@ jobs:
           # monitor.py reads it automatically from the environment.
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           # Telegram @username to mention on 🔥 hot (3x-runner) alerts so they push
-          # on-spot. Override by setting an ALERT_MENTION repo variable.
-          ALERT_MENTION: ${{ vars.ALERT_MENTION || '' }}
+          # on-spot. Add it as an ALERT_MENTION repo Variable (preferred) OR Secret —
+          # this reads whichever is set.
+          ALERT_MENTION: ${{ vars.ALERT_MENTION || secrets.ALERT_MENTION || '' }}
           STRICT_FLAG: ${{ (inputs.strict && '--strict') || '--no-strict' }}
           EQUITY: ${{ inputs.equity || '25000' }}
           LOOSE: ${{ inputs.loose && 'true' || 'false' }}
