@@ -124,8 +124,10 @@ jobs:
             echo "::warning::FINNHUB_API_KEY secret is not set — the PR-wire RSS feeds 403 GitHub runner IPs, so the scan will likely find 0 items. Add a free key from finnhub.io under Settings > Secrets > Actions to get real alerts."
           fi
           mkdir -p .cache
-          # Default (cron): strict micro-cap momentum screen, shared seen-state.
-          SCREEN=""
+          # Default (cron): looser small/micro-cap momentum screen than the script
+          # defaults so more genuine catalysts surface — sub-$20 price, modest
+          # RVOL/gap/volume gates, wider float. Shared seen-state. Tune here.
+          SCREEN="--max-price 20 --min-change-pct 5 --min-rel-vol 1.5 --min-avg-vol 200000 --max-float 50000000"
           STATE=".cache/seen.txt"
           if [ "$LOOSE" = "true" ]; then
             # TEST mode (manual only): drop the momentum gates to keyword+ticker
