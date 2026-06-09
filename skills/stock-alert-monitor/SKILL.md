@@ -33,6 +33,11 @@ The float / relative-volume / % change gates need the **live quote feed**. In
 dropped; pass `--no-strict` to fall back to keyword + best-effort-price matching
 when the quote feed is partially blocked.
 
+> The bundled GitHub Actions cron runs a **looser** screen than these script
+> defaults — sub-$20 price, `--min-change-pct 5 --min-rel-vol 1.5
+> --min-avg-vol 200000 --max-float 50000000`, `--no-strict` — to surface more
+> catalysts. Tune it in `.github/workflows/stock-alert-monitor.yml`.
+
 ## When to Use This Skill
 
 - You want a hands-off, always-on watcher for catalyst-driven moves in cheap stocks
