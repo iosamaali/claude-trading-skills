@@ -43,6 +43,11 @@ on:
         description: "Account equity for position sizing (USD)"
         type: string
         default: "25000"
+      finnhub_category:
+        description: "Finnhub news category to scan"
+        type: choice
+        options: ["general", "merger"]
+        default: "general"
 
 permissions:
   contents: read
@@ -100,6 +105,7 @@ jobs:
           EQUITY: ${{ inputs.equity || '25000' }}
           LOOSE: ${{ inputs.loose && 'true' || 'false' }}
           TEST_PING: ${{ inputs.test_ping && 'true' || 'false' }}
+          FINNHUB_CATEGORY: ${{ inputs.finnhub_category || 'general' }}
         run: |
           if [ -z "$ALERT_TELEGRAM_TOKEN" ] || [ -z "$ALERT_TELEGRAM_CHAT_ID" ]; then
             echo "::error::ALERT_TELEGRAM_TOKEN / ALERT_TELEGRAM_CHAT_ID secrets are not set — add them under Settings > Secrets > Actions"
@@ -136,6 +142,7 @@ jobs:
             --equity "$EQUITY" \
             --state "$STATE" \
             --issuer-cache .cache/company_tickers.json \
+            --finnhub-category "$FINNHUB_CATEGORY" \
             --mention "$ALERT_MENTION" \
             --telegram-token "$ALERT_TELEGRAM_TOKEN" \
             --telegram-chat-id "$ALERT_TELEGRAM_CHAT_ID"

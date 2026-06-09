@@ -495,17 +495,24 @@ def run_pass(args, seen: set, issuer_map: dict | None = None) -> int:
     # Gather candidate items from every source: RSS/Atom feeds + (when configured)
     # the Finnhub REST news API, which stays reachable from CI/datacenter IPs.
     items: list[dict] = []
+    n_rss = n_finnhub = 0
     for feed in args.feeds:
         try:
             xml = _http_get(feed, timeout=args.timeout)
         except Exception as e:
             print(f"# feed error {feed}: {e}", file=sys.stderr, flush=True)
             continue
-        items.extend(parse_feed(xml))
+        parsed = parse_feed(xml)
+        n_rss += len(parsed)
+        items.extend(parsed)
     if getattr(args, "finnhub_token", ""):
-        items.extend(fetch_finnhub_news(
-            args.finnhub_token, args.finnhub_category, args.timeout))
+        fh = fetch_finnhub_news(args.finnhub_token, args.finnhub_category, args.timeout)
+        n_finnhub = len(fh)
+        items.extend(fh)
 
+    # funnel telemetry: where candidates drop, so a quiet pass vs a blocked quote
+    # feed vs a too-tight screen is diagnosable straight from the logs.
+    c_catalyst = c_ticker = c_quoted = 0
     for item in items:
         key = item.get("link") or item["title"]
         if key in seen:
@@ -515,6 +522,7 @@ def run_pass(args, seen: set, issuer_map: dict | None = None) -> int:
         if not cats:
             seen.add(key)
             continue
+        c_catalyst += 1
         # prefer a source-provided authoritative ticker (e.g. Finnhub `related`),
         # then the headline's embedded "(Nasdaq: XYZ)"/"$XYZ", then SEC name lookup
         ticker = item.get("ticker") or extract_ticker(text)
@@ -525,6 +533,7 @@ def run_pass(args, seen: set, issuer_map: dict | None = None) -> int:
         if not ticker:
             seen.add(key)
             continue
+        c_ticker += 1
         # cheap NASDAQ-only prefilter when the headline names the exchange
         if args.nasdaq_only:
             exch = extract_exchange(text)
@@ -536,6 +545,7 @@ def run_pass(args, seen: set, issuer_map: dict | None = None) -> int:
         if not quote or quote.get("price") is None:
             seen.add(key)
             continue
+        c_quoted += 1
         if not passes_screen(quote, args):
             seen.add(key)
             continue
@@ -558,7 +568,13 @@ def run_pass(args, seen: set, issuer_map: dict | None = None) -> int:
                 args.telegram_token, args.telegram_chat_id, match, args.mention
             )
         if args.max_alerts and new_count >= args.max_alerts:
+            print(f"# funnel: items={len(items)} (rss={n_rss} finnhub={n_finnhub}) "
+                  f"catalyst={c_catalyst} ticker={c_ticker} quoted={c_quoted} "
+                  f"matched={new_count} (alert cap hit)", flush=True)
             return new_count  # cap reached; remaining items stay unseen for next pass
+    print(f"# funnel: items={len(items)} (rss={n_rss} finnhub={n_finnhub}) "
+          f"catalyst={c_catalyst} ticker={c_ticker} quoted={c_quoted} "
+          f"matched={new_count}", flush=True)
     return new_count
 
 
