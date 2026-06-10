@@ -152,7 +152,7 @@ https://…
 ```
 
 - **Extended hours**: the quote is **session-aware** — in pre/after-hours it screens and shows the **pre/post-market** price + %change (tagged ` pre`/` post`), so gappers register before the open and after the close.
-- **Header emoji**: 🟢 actionable now · 🟡 extended (`change_pct ≥ --extended-pct`) → recommends waiting for a pullback instead of chasing. A **🔥** prefix flags a potential **3x runner** (float ≤ `--hot-float`, RVOL ≥ `--hot-rvol`, gap ≥ `--hot-gap`).
+- **Header emoji**: 🟢 actionable now · 🟡 extended (`change_pct ≥ --extended-pct`) → recommends waiting for a pullback instead of chasing. A **🔥** prefix flags a potential **3x runner** and is what makes the Telegram push **buzz with sound** (+ `--mention`). It fires when the **gap ≥ `--hot-gap`** (the always-available metric), additionally requiring float ≤ `--hot-float` and RVOL ≥ `--hot-rvol` **only when those values are known** — so a big mover still buzzes the phone on quote feeds (e.g. GitHub runners) that don't return float/RVOL.
 - **Entry** = current ask; **pullback**/**watch** levels are `--pullback-pct` / `--watch-pct` below it.
 - **Stop (Hard)** = session low when it sits below entry, else a `--stop-pct` stop. *A true 15-minute-low stop needs intraday bars — that lives in `momentum_lifecycle.py`; the scanner uses the session low as the closest quote-level proxy.*
 - **Target (Sell 50%)** = entry + `--target-r` × (entry − stop).

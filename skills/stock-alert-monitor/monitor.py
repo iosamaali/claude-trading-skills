@@ -408,10 +408,16 @@ def trade_levels(q: dict, args) -> dict:
     pullback = round(entry * (1 - args.pullback_pct / 100), 2) if entry else None
     watch = round(entry * (1 - args.watch_pct / 100), 2) if entry else None
     size = int(args.equity * args.alloc_pct / 100 / entry) if (args.equity and entry) else None
+    # 🔥 3x-runner / phone-buzz tag. The gap (% change) is the one metric the quote
+    # feed always returns, so key "hot" off it; the float/RVOL gates only constrain
+    # when those values are known. Yahoo's CI/datacenter fallback omits float & RVOL,
+    # so the old "require all three" rule made hot unreachable on the runner (every
+    # alert went out silent). Now a big confirmed gap buzzes the phone even without
+    # float/RVOL, while still demanding low float + high RVOL when the data is present.
     hot = bool(
-        q.get("float") and q["float"] <= args.hot_float
-        and q.get("rel_vol") and q["rel_vol"] >= args.hot_rvol
-        and chg is not None and chg >= args.hot_gap
+        chg is not None and chg >= args.hot_gap
+        and (not q.get("float") or q["float"] <= args.hot_float)
+        and (not q.get("rel_vol") or q["rel_vol"] >= args.hot_rvol)
     )
     return {
         "entry": entry, "ask": ask, "stop": stop, "stop_label": stop_label,
